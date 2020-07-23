@@ -1,8 +1,6 @@
 package injector
 
 import (
-	"github.com/PPIO/pi-common-go/app-error"
-	"github.com/PPIO/pi-common-go/utils"
 	"github.com/pkg/errors"
 	"log"
 )
@@ -23,7 +21,7 @@ type user struct {
 
 func userByUsername(username string) (*user, error) {
 	if username == "fuck" || username == "" {
-		return nil, app_error.ParamInvalid.Wrap(errors.New("'fuck' or empty username is not allowed"))
+		return nil, errors.New("'fuck' or empty username is not allowed")
 	}
 	return &user{
 		RoleType: 0,
@@ -72,5 +70,5 @@ func Test() {
 	}
 	err = inject.Struct(param)
 	log.Println(err)
-	log.Printf(utils.Json(param))
+	log.Printf("%#v", param)
 }
