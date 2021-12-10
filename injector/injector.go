@@ -426,7 +426,7 @@ func (inj *Inject) traverseField(topStruct reflect.Value, currentStruct reflect.
 		}
 	}
 
-	if !ct.hasTag {
+	if ct == nil || !ct.hasTag {
 		return nil
 	}
 

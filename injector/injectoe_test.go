@@ -2,7 +2,9 @@ package injector
 
 import (
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"log"
+	"testing"
 )
 
 type userInput struct {
@@ -48,7 +50,7 @@ func userByUsernameAndRole(username string, role string) (*user, error) {
 	return u, nil
 }
 
-func Test() {
+func TestStruct(t *testing.T) {
 	inject := New(&Config{
 		TagName:      "inject",
 		FieldNameTag: "",
@@ -69,6 +71,46 @@ func Test() {
 		Role:      "miner",
 	}
 	err = inject.Struct(param)
-	log.Println(err)
-	log.Printf("%#v", param)
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NotNil(t, param.User) {
+		return
+	}
+}
+
+func TestStructMap(t *testing.T) {
+	inject := New(&Config{
+		TagName:      "inject",
+		FieldNameTag: "",
+	})
+	err := inject.AddResolver(userByUsername)
+	if err != nil {
+		panic(err)
+	}
+	err = inject.AddResolver(userByUsernameAndRole)
+	if err != nil {
+		panic(err)
+	}
+	inject.CacheForStruct(&userInput{})
+	type temp struct {
+		Mp map[string]userInput `inject:"dive"`
+	}
+	param := temp{
+		Mp: map[string]userInput{
+			"a": {
+				Username1: "peter",
+				Username2: "",
+				Role:      "miner",
+			},
+		},
+	}
+	err = inject.Struct(&param)
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NotNil(t, param.Mp["a"].User) {
+		return
+	}
+	log.Println(param.Mp["a"].User)
 }
