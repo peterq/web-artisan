@@ -67,7 +67,7 @@ func (inj *Inject) AddFunc(tag string, fn interface{}) {
 }
 
 func (inj *Inject) AddVar(tag string, val interface{}) {
-	inj.funcs[tag] = val
+	inj.variables[tag] = val
 }
 
 func (inj *Inject) ExtractType(current reflect.Value) (reflect.Value, reflect.Kind) {

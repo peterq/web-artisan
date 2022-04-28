@@ -104,15 +104,28 @@ func enumTag(state *TagFnState) TagFn {
 
 	switch state.Field.Kind() {
 	case reflect.String:
-		members := strings.Split(state.Param, enumSep)
+		kind, v := state.Inj.ParseTagValue(state.Param)
+		var memberSet = map[string]bool{}
+		var memberArr []string
+		if kind == reflect.String {
+			memberArr = strings.Split(state.Param, enumSep)
+		} else if arr, ok := v.([]string); ok {
+			memberArr = arr
+		} else {
+			panic(fmt.Sprintf("enum members type need comma separated string or a variable refers to string slice, got %T", v))
+		}
+		for _, name := range memberArr {
+			memberSet[name] = true
+		}
 		return func(state *TagFnState) (value reflect.Value, err error) {
 			p := state.Field.Interface().(string)
-			for _, member := range members {
-				if p == member {
-					return state.Field, nil
-				}
+			if memberSet[p] {
+				return state.Field, nil
 			}
-			return reflect.ValueOf(members[0]), nil
+			if p == "" && len(memberArr) > 0 {
+				return reflect.ValueOf(memberArr[0]), nil
+			}
+			return state.Field, errors.Errorf("[%s] is not valid option", p)
 		}
 	default:
 		panic(fmt.Sprintf("enum not supported for %s", state.Field.Kind()))
