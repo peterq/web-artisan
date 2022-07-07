@@ -47,11 +47,20 @@ type StructLevel struct {
 
 // tag 处理器
 type TagFn func(state *TagFnState) (reflect.Value, error)
+
 type TagFnState struct {
 	Inj           *Inject
 	CurrentStruct reflect.Value
 	Field         reflect.Value
 	Param         string
+	CtxData       map[string]interface{}
+}
+
+func (s *TagFnState) Get(key string) interface{} {
+	if s.CtxData != nil {
+		return s.CtxData[key]
+	}
+	return nil
 }
 
 // 注入器结构体
@@ -196,6 +205,9 @@ func (inj *Inject) RegisterAliasInjection(alias, tags string) {
 
 // 只注入指定部分字段
 func (inj *Inject) StructPartial(current interface{}, fields ...string) error {
+	return inj.StructPartialWithCtxData(current, fields, nil)
+}
+func (inj *Inject) StructPartialWithCtxData(current interface{}, fields []string, ctxData map[string]interface{}) error {
 	inj.initCheck()
 
 	sv, _ := inj.ExtractType(reflect.ValueOf(current))
@@ -237,11 +249,15 @@ func (inj *Inject) StructPartial(current interface{}, fields ...string) error {
 		}
 	}
 
-	return inj.injectStruct(sv, sv, sv, blank, blank, true, len(m) != 0, false, m)
+	return inj.injectStruct(sv, sv, sv, blank, blank, true, len(m) != 0, false, m, ctxData)
 }
 
 // 注入指定部分之外的字段
 func (inj *Inject) StructExcept(current interface{}, fields ...string) error {
+	return inj.StructExceptWithCtxData(current, fields, nil)
+}
+
+func (inj *Inject) StructExceptWithCtxData(current interface{}, fields []string, ctxData map[string]interface{}) error {
 	inj.initCheck()
 
 	sv, _ := inj.ExtractType(reflect.ValueOf(current))
@@ -252,7 +268,7 @@ func (inj *Inject) StructExcept(current interface{}, fields ...string) error {
 		m[name+namespaceSeparator+key] = struct{}{}
 	}
 
-	err := inj.injectStruct(sv, sv, sv, blank, blank, true, len(m) != 0, true, m)
+	err := inj.injectStruct(sv, sv, sv, blank, blank, true, len(m) != 0, true, m, ctxData)
 	if err != nil {
 		return err
 	}
@@ -261,9 +277,13 @@ func (inj *Inject) StructExcept(current interface{}, fields ...string) error {
 
 // 结构体注入
 func (inj *Inject) Struct(current interface{}) error {
+	return inj.StructWithCtxData(current, nil)
+}
+
+func (inj *Inject) StructWithCtxData(current interface{}, ctxData map[string]interface{}) error {
 	inj.initCheck()
 	sv := reflect.ValueOf(current)
-	err := inj.injectStruct(sv, sv, sv, blank, blank, true, false, false, nil)
+	err := inj.injectStruct(sv, sv, sv, blank, blank, true, false, false, nil, ctxData)
 	if err != nil {
 		return err
 	}
@@ -271,7 +291,7 @@ func (inj *Inject) Struct(current interface{}) error {
 }
 
 // 结构体注入入口
-func (inj *Inject) injectStruct(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, useStructName bool, partial bool, exclude bool, includeExclude map[string]struct{}) *FieldError {
+func (inj *Inject) injectStruct(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, useStructName bool, partial bool, exclude bool, includeExclude map[string]struct{}, ctxData map[string]interface{}) *FieldError {
 
 	if current.Kind() == reflect.Ptr && !current.IsNil() {
 		current = current.Elem()
@@ -285,18 +305,18 @@ func (inj *Inject) injectStruct(topStruct reflect.Value, currentStruct reflect.V
 		panic("the value passed for injection must be able to be obtained with Addr")
 	}
 
-	return inj.traverseStruct(topStruct, currentStruct, current, errPrefix, nsPrefix, useStructName, partial, exclude, includeExclude, nil, nil)
+	return inj.traverseStruct(topStruct, currentStruct, current, errPrefix, nsPrefix, useStructName, partial, exclude, includeExclude, nil, nil, ctxData)
 }
 
 // 遍历结构体所有字段, 并传入traverseField
-func (inj *Inject) traverseStruct(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, useStructName bool, partial bool, exclude bool, includeExclude map[string]struct{}, cs *cStruct, ct *cTag) *FieldError {
+func (inj *Inject) traverseStruct(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, useStructName bool, partial bool, exclude bool, includeExclude map[string]struct{}, cs *cStruct, ct *cTag, ctxData map[string]interface{}) *FieldError {
 	var ok bool
 	first := len(nsPrefix) == 0
 	typ := current.Type()
 
 	cs, ok = inj.structCache.Get(typ)
 	if !ok {
-		cs = inj.extractStructCache(current, typ.Name())
+		cs = inj.extractStructCache(current, typ.Name(), map[string]interface{}{})
 	}
 
 	if useStructName {
@@ -322,7 +342,7 @@ func (inj *Inject) traverseStruct(topStruct reflect.Value, currentStruct reflect
 					continue
 				}
 			}
-			e := inj.traverseField(topStruct, currentStruct, current.Field(f.Idx), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, f, f.cTags)
+			e := inj.traverseField(topStruct, currentStruct, current.Field(f.Idx), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, f, f.cTags, ctxData)
 			if e != nil {
 				return e
 			}
@@ -338,7 +358,7 @@ func (inj *Inject) traverseStruct(topStruct reflect.Value, currentStruct reflect
 }
 
 // 遍历某字段的tag, 执行相应的注入函数
-func (inj *Inject) traverseField(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, partial bool, exclude bool, includeExclude map[string]struct{}, cs *cStruct, cf *cField, ct *cTag) *FieldError {
+func (inj *Inject) traverseField(topStruct reflect.Value, currentStruct reflect.Value, current reflect.Value, errPrefix string, nsPrefix string, partial bool, exclude bool, includeExclude map[string]struct{}, cs *cStruct, cf *cField, ct *cTag, ctxData map[string]interface{}) *FieldError {
 
 	var newVal reflect.Value = current
 	var tagFnErr error
@@ -359,7 +379,7 @@ func (inj *Inject) traverseField(topStruct reflect.Value, currentStruct reflect.
 	var typ reflect.Type
 
 	switch kind {
-	case reflect.Ptr, reflect.Interface, reflect.Invalid:
+	case reflect.Ptr, reflect.Invalid:
 
 		if kind == reflect.Ptr && ct != nil {
 			break
@@ -419,7 +439,7 @@ func (inj *Inject) traverseField(topStruct reflect.Value, currentStruct reflect.
 				return nil
 			}
 
-			nestedStructError := inj.traverseStruct(topStruct, current, current, errPrefix+cf.Name+namespaceSeparator, nsPrefix+cf.AltName+namespaceSeparator, false, partial, exclude, includeExclude, cs, ct)
+			nestedStructError := inj.traverseStruct(topStruct, current, current, errPrefix+cf.Name+namespaceSeparator, nsPrefix+cf.AltName+namespaceSeparator, false, partial, exclude, includeExclude, cs, ct, ctxData)
 			if nestedStructError != nil {
 				return nestedStructError
 			}
@@ -463,7 +483,7 @@ OUTER:
 			case reflect.Slice, reflect.Array:
 
 				for i := 0; i < current.Len(); i++ {
-					e := inj.traverseField(topStruct, currentStruct, current.Index(i), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, &cField{Name: fmt.Sprintf(arrayIndexFieldName, cf.Name, i), AltName: fmt.Sprintf(arrayIndexFieldName, cf.AltName, i)}, ct)
+					e := inj.traverseField(topStruct, currentStruct, current.Index(i), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, &cField{Name: fmt.Sprintf(arrayIndexFieldName, cf.Name, i), AltName: fmt.Sprintf(arrayIndexFieldName, cf.AltName, i)}, ct, ctxData)
 					if e != nil {
 						return e
 					}
@@ -471,7 +491,7 @@ OUTER:
 
 			case reflect.Map:
 				for _, key := range current.MapKeys() {
-					e := inj.traverseField(topStruct, currentStruct, current.MapIndex(key), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, &cField{Name: fmt.Sprintf(mapIndexFieldName, cf.Name, key.Interface()), AltName: fmt.Sprintf(mapIndexFieldName, cf.AltName, key.Interface())}, ct)
+					e := inj.traverseField(topStruct, currentStruct, current.MapIndex(key), errPrefix, nsPrefix, partial, exclude, includeExclude, cs, &cField{Name: fmt.Sprintf(mapIndexFieldName, cf.Name, key.Interface()), AltName: fmt.Sprintf(mapIndexFieldName, cf.AltName, key.Interface())}, ct, ctxData)
 					if e != nil {
 						return e
 					}
@@ -495,6 +515,7 @@ OUTER:
 					CurrentStruct: currentStruct,
 					Field:         newVal,
 					Param:         ct.param,
+					CtxData:       ctxData,
 				})
 				if tagFnErr == nil {
 
@@ -560,6 +581,7 @@ OUTER:
 				CurrentStruct: currentStruct,
 				Field:         newVal,
 				Param:         ct.param,
+				CtxData:       ctxData,
 			})
 
 			if tagFnErr != nil {

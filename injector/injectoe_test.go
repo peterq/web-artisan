@@ -94,10 +94,11 @@ func TestStructMap(t *testing.T) {
 	}
 	inject.CacheForStruct(&userInput{})
 	type temp struct {
-		Mp map[string]userInput `inject:"dive"`
+		Mp map[string]*userInput `inject:"dive"`
 	}
+	inject.CacheForStruct(&temp{})
 	param := temp{
-		Mp: map[string]userInput{
+		Mp: map[string]*userInput{
 			"a": {
 				Username1: "peter",
 				Username2: "",
@@ -113,4 +114,39 @@ func TestStructMap(t *testing.T) {
 		return
 	}
 	log.Println(param.Mp["a"].User)
+}
+
+func TestInject_StructWithCtxData(t *testing.T) {
+	inject := New(&Config{
+		TagName:      "inject",
+		FieldNameTag: "",
+	})
+	type input struct {
+		A int
+		B int `inject:"by=A"`
+	}
+	err := inject.AddResolver(func(state *TagFnState, a int) (int, error) {
+		if state.CtxData == nil {
+			return 0, errors.New("ctx data is nil")
+		}
+		base, ok := state.CtxData["base"].(int)
+		if !ok {
+			return 0, errors.New("base is not provided")
+		}
+		return base + a, nil
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	inject.CacheForStruct(&input{})
+	param := &input{
+		A: 1,
+	}
+	err = inject.StructWithCtxData(param, map[string]interface{}{"base": 10})
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.Equal(t, 11, param.B) {
+		return
+	}
 }

@@ -101,7 +101,7 @@ type TagInfo struct {
 	Data interface{}
 }
 
-func (inj *Inject) extractStructCache(current reflect.Value, sName string) *cStruct {
+func (inj *Inject) extractStructCache(current reflect.Value, sName string, ctxData map[string]interface{}) *cStruct {
 
 	inj.structCache.lock.Lock()
 	defer inj.structCache.lock.Unlock()
@@ -153,7 +153,7 @@ func (inj *Inject) extractStructCache(current reflect.Value, sName string) *cStr
 		// and so only struct level caching can be used instead of combined with Field tag caching
 
 		if len(tag) > 0 {
-			ctag, _ = inj.parseFieldTagsRecursive(tag, fld.Name, blank, false, current, current.Field(i))
+			ctag, _ = inj.parseFieldTagsRecursive(tag, fld.Name, blank, false, current, current.Field(i), ctxData)
 		} else {
 			// even if field doesn't have injections need cTag for traversing to potential inner/nested
 			// elements of the field.
@@ -169,7 +169,7 @@ func (inj *Inject) extractStructCache(current reflect.Value, sName string) *cStr
 	return cs
 }
 
-func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias string, hasAlias bool, currentStruct reflect.Value, field reflect.Value) (firstCtag *cTag, current *cTag) {
+func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias string, hasAlias bool, currentStruct reflect.Value, field reflect.Value, ctxData map[string]interface{}) (firstCtag *cTag, current *cTag) {
 
 	var t string
 	noAlias := len(alias) == 0
@@ -188,9 +188,9 @@ func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias s
 			if tagsVal, found := inj.aliasInjectors[t]; found {
 
 				if i == 0 {
-					firstCtag, current = inj.parseFieldTagsRecursive(tagsVal, fieldName, t, true, currentStruct, field)
+					firstCtag, current = inj.parseFieldTagsRecursive(tagsVal, fieldName, t, true, currentStruct, field, ctxData)
 				} else {
-					next, curr := inj.parseFieldTagsRecursive(tagsVal, fieldName, t, true, currentStruct, field)
+					next, curr := inj.parseFieldTagsRecursive(tagsVal, fieldName, t, true, currentStruct, field, ctxData)
 					current.next, current = next, curr
 
 				}
@@ -268,6 +268,7 @@ func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias s
 						CurrentStruct: currentStruct,
 						Field:         field,
 						Param:         tagParams,
+						CtxData:       ctxData,
 					})
 				}
 
@@ -286,6 +287,10 @@ func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias s
 }
 
 func (inj *Inject) CacheForStruct(s interface{}) {
+	inj.CacheForStructWithCtxData(s, nil)
+}
+
+func (inj *Inject) CacheForStructWithCtxData(s interface{}, ctxData map[string]interface{}) {
 	current := reflect.ValueOf(s)
 	if current.Kind() == reflect.Ptr && !current.IsNil() {
 		current = current.Elem()
@@ -300,5 +305,5 @@ func (inj *Inject) CacheForStruct(s interface{}) {
 		panic("the value passed for injection must be able to be obtained with Addr")
 	}
 
-	inj.extractStructCache(current, current.Type().Name())
+	inj.extractStructCache(current, current.Type().Name(), ctxData)
 }

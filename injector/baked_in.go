@@ -133,10 +133,12 @@ func enumTag(state *TagFnState) TagFn {
 }
 
 type byResolver struct {
-	in  []reflect.Type
-	out []reflect.Type
-	fn  reflect.Value
+	matchTagBinding func(byFieldNames []string, by []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error)
 }
+
+var (
+	typTagFnStatePtr = reflect.TypeOf((*TagFnState)(nil))
+)
 
 func (inj *Inject) AddResolver(fn interface{}) (err error) {
 	rfn := reflect.ValueOf(fn)
@@ -144,26 +146,75 @@ func (inj *Inject) AddResolver(fn interface{}) (err error) {
 	if rfn.Kind() != reflect.Func || rfn.IsNil() {
 		return errors.New("by resolver must be func")
 	}
-	if tfn.NumOut() != 2 || tfn.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-		return errors.New("by resolver must return 2 param, and the second must be error")
-	}
-	r := byResolver{
-		in:  make([]reflect.Type, tfn.NumIn()),
-		out: make([]reflect.Type, tfn.NumOut()),
-		fn:  rfn,
-	}
+
+	resolverInParams := make([]reflect.Type, tfn.NumIn())
+	resolverOutParams := make([]reflect.Type, tfn.NumOut())
 	for i := 0; i < tfn.NumIn(); i++ {
-		r.in[i] = tfn.In(i)
+		resolverInParams[i] = tfn.In(i)
 	}
 	for i := 0; i < tfn.NumOut(); i++ {
-		r.out[i] = tfn.Out(i)
+		resolverOutParams[i] = tfn.Out(i)
 	}
-	inj.byResolver = append(inj.byResolver, r)
-	return
+	if tfn.NumOut() > 2 || tfn.NumOut() < 1 {
+		return errors.New("by resolver must have 1 or 2 out params")
+	}
+	if tfn.NumOut() == 2 && !tfn.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+		return errors.New("by resolver second out param must be error")
+	}
+	inj.byResolver = append(inj.byResolver, byResolver{
+		matchTagBinding: func(byFieldNames []string, byTypes []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error) {
+			resolverInParamsMaker := make([]func(state *TagFnState) (value reflect.Value, err error), len(resolverInParams))
+			resolverInParamsIdx, byIdx := 0, 0
+			for resolverInParamsIdx < len(resolverInParams) && byIdx < len(byTypes) {
+				if byTypes[byIdx].AssignableTo(resolverInParams[resolverInParamsIdx]) {
+					thisByIdx := byIdx
+					resolverInParamsMaker[resolverInParamsIdx] = func(state *TagFnState) (value reflect.Value, err error) {
+						v, _, ok := state.Inj.GetStructFieldOK(state.CurrentStruct, byFieldNames[thisByIdx])
+						if !ok {
+							return value, errors.New(fmt.Sprintf("get filed %s error", byFieldNames[thisByIdx]))
+						}
+						return v, nil
+					}
+					resolverInParamsIdx++
+					byIdx++
+				} else if typTagFnStatePtr.AssignableTo(resolverInParams[resolverInParamsIdx]) {
+					resolverInParamsMaker[resolverInParamsIdx] = func(state *TagFnState) (value reflect.Value, err error) {
+						return reflect.ValueOf(state), nil
+					}
+					resolverInParamsIdx++
+				} else {
+					return nil
+				}
+			}
+			if resolverInParamsIdx < len(resolverInParams) || byIdx < len(byTypes) {
+				return nil
+			}
+
+			return func(state *TagFnState) (value reflect.Value, err error) {
+				in := make([]reflect.Value, len(resolverInParamsMaker))
+				for i, maker := range resolverInParamsMaker {
+					var param reflect.Value
+					param, err = maker(state)
+					if err != nil {
+						return value, errors.Wrap(err, fmt.Sprintf("make resolver param %d [%s] error", i, resolverInParams[i].String()))
+					}
+					in[i] = param
+				}
+				out := rfn.Call(in)
+				if len(out) == 2 {
+					if !out[1].IsNil() {
+						return value, out[1].Interface().(error)
+					}
+				}
+				return out[0], nil
+			}
+		},
+	})
+	return nil
 }
 
 func byTag(state *TagFnState) TagFn {
-	var in, out []reflect.Type
+	var in []reflect.Type
 	parts := strings.Split(state.Param, bySep)
 	for _, part := range parts {
 		v, _, ok := state.Inj.GetStructFieldOK(state.CurrentStruct, part)
@@ -173,50 +224,19 @@ func byTag(state *TagFnState) TagFn {
 		}
 		in = append(in, v.Type())
 	}
-	out = append(out, state.Field.Type())
-	out = append(out, reflect.TypeOf((*error)(nil)).Elem())
-	var fn reflect.Value
-
-OUTER:
-	for _, resolver := range state.Inj.byResolver {
-		if len(resolver.in) != len(in) || len(resolver.out) != len(out) {
-			continue
+	out := state.Field.Type()
+	var exec func(state *TagFnState) (value reflect.Value, err error)
+	for _, r := range state.Inj.byResolver {
+		exec = r.matchTagBinding(parts, in, out)
+		if exec != nil {
+			break
 		}
-		for idx, typ := range resolver.in {
-			if in[idx] != typ {
-				continue OUTER
-			}
-		}
-		for idx, typ := range resolver.out {
-			if out[idx] != typ {
-				continue OUTER
-			}
-		}
-		fn = resolver.fn
 	}
-
-	if !fn.IsValid() {
+	if exec == nil {
 		panic(fmt.Sprintf("by tag init panic: struct: %s, param: %s; cant find resolver, are you registered?",
 			state.CurrentStruct.Type(), state.Param))
 	}
-
-	return func(state *TagFnState) (value reflect.Value, err error) {
-		var inParams []reflect.Value
-		for _, part := range parts {
-			v, _, ok := state.Inj.GetStructFieldOK(state.CurrentStruct, part)
-			if !ok {
-				panic(fmt.Sprintf("by tag init panic: struct: %s, param: %s, get field %s not ok",
-					state.CurrentStruct.Type(), state.Param, part))
-			}
-			inParams = append(inParams, v)
-		}
-		outParams := fn.Call(inParams)
-		value = outParams[0]
-		if !outParams[1].IsNil() {
-			err = outParams[1].Interface().(error)
-		}
-		return
-	}
+	return exec
 }
 
 // 0值判断
