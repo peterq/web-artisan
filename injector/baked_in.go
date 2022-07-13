@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"reflect"
+	"regexp"
+	"runtime/debug"
 	"strings"
 )
 
@@ -133,7 +135,7 @@ func enumTag(state *TagFnState) TagFn {
 }
 
 type byResolver struct {
-	matchTagBinding func(byFieldNames []string, by []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error)
+	matchTagBinding func(useResolver string, byFieldNames []string, by []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error)
 }
 
 var (
@@ -141,6 +143,10 @@ var (
 )
 
 func (inj *Inject) AddResolver(fn interface{}) (err error) {
+	return inj.AddResolverWithName("", fn)
+}
+
+func (inj *Inject) AddResolverWithName(resolverName string, fn interface{}) (err error) {
 	rfn := reflect.ValueOf(fn)
 	tfn := reflect.TypeOf(fn)
 	if rfn.Kind() != reflect.Func || rfn.IsNil() {
@@ -161,8 +167,16 @@ func (inj *Inject) AddResolver(fn interface{}) (err error) {
 	if tfn.NumOut() == 2 && !tfn.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
 		return errors.New("by resolver second out param must be error")
 	}
+	outTyp := tfn.Out(0)
 	inj.byResolver = append(inj.byResolver, byResolver{
-		matchTagBinding: func(byFieldNames []string, byTypes []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error) {
+		matchTagBinding: func(useResolver string, byFieldNames []string, byTypes []reflect.Type, to reflect.Type) func(state *TagFnState) (value reflect.Value, err error) {
+			if useResolver != "" && useResolver != resolverName {
+				return nil
+			}
+			if !outTyp.AssignableTo(to) {
+				return nil
+			}
+
 			resolverInParamsMaker := make([]func(state *TagFnState) (value reflect.Value, err error), len(resolverInParams))
 			resolverInParamsIdx, byIdx := 0, 0
 			for resolverInParamsIdx < len(resolverInParams) && byIdx < len(byTypes) {
@@ -191,6 +205,20 @@ func (inj *Inject) AddResolver(fn interface{}) (err error) {
 			}
 
 			return func(state *TagFnState) (value reflect.Value, err error) {
+				defer func() {
+					e := recover()
+					if e == nil {
+						return
+					}
+					println(e)
+					debug.PrintStack()
+					var ok bool
+					err, ok = e.(error)
+					if !ok {
+						err = errors.New(fmt.Sprintf("paniked: %v", e))
+					}
+				}()
+
 				in := make([]reflect.Value, len(resolverInParamsMaker))
 				for i, maker := range resolverInParamsMaker {
 					var param reflect.Value
@@ -213,9 +241,19 @@ func (inj *Inject) AddResolver(fn interface{}) (err error) {
 	return nil
 }
 
+var regUseResolver = regexp.MustCompile(`^@(\w+):`)
+
 func byTag(state *TagFnState) TagFn {
 	var in []reflect.Type
-	parts := strings.Split(state.Param, bySep)
+	var useResolver string
+	var parts []string
+	if use := regUseResolver.FindStringSubmatch(state.Param); len(use) == 2 {
+		useResolver = use[1]
+		parts = strings.Split(regUseResolver.ReplaceAllString(state.Param, ""), bySep)
+	} else {
+		parts = strings.Split(state.Param, bySep)
+	}
+
 	for _, part := range parts {
 		v, _, ok := state.Inj.GetStructFieldOK(state.CurrentStruct, part)
 		if !ok {
@@ -227,7 +265,7 @@ func byTag(state *TagFnState) TagFn {
 	out := state.Field.Type()
 	var exec func(state *TagFnState) (value reflect.Value, err error)
 	for _, r := range state.Inj.byResolver {
-		exec = r.matchTagBinding(parts, in, out)
+		exec = r.matchTagBinding(useResolver, parts, in, out)
 		if exec != nil {
 			break
 		}
