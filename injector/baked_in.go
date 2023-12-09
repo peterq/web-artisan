@@ -255,12 +255,12 @@ func byTag(state *TagFnState) TagFn {
 	}
 
 	for _, part := range parts {
-		v, _, ok := state.Inj.GetStructFieldOK(state.CurrentStruct, part)
-		if !ok {
+		t := GetFieldTypeByNestedName(state.CurrentStruct.Type(), part)
+		if t == nil || t.Kind() == reflect.Invalid {
 			panic(fmt.Sprintf("by tag init panic: struct: %s, param: %s, get field %s not ok",
 				state.CurrentStruct.Type(), state.Param, part))
 		}
-		in = append(in, v.Type())
+		in = append(in, t)
 	}
 	out := state.Field.Type()
 	var exec func(state *TagFnState) (value reflect.Value, err error)
@@ -271,8 +271,8 @@ func byTag(state *TagFnState) TagFn {
 		}
 	}
 	if exec == nil {
-		panic(fmt.Sprintf("by tag init panic: struct: %s, param: %s; cant find resolver, are you registered?",
-			state.CurrentStruct.Type(), state.Param))
+		panic(fmt.Sprintf("by tag init panic: struct: %s, param: %s; out: %s cant find resolver, are you registered?",
+			state.CurrentStruct.Type(), state.Param, out.String()))
 	}
 	return exec
 }

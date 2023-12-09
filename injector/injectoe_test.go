@@ -150,3 +150,37 @@ func TestInject_StructWithCtxData(t *testing.T) {
 		return
 	}
 }
+
+func TestInjectByNestedField(t *testing.T) {
+	inject := New(&Config{
+		TagName:      "inject",
+		FieldNameTag: "",
+	})
+	type input struct {
+		Username string
+	}
+	type input2 struct {
+		C    input
+		User *user `inject:"by=C.Username"`
+	}
+	err := inject.AddResolver(userByUsername)
+	if err != nil {
+		panic(err)
+	}
+	inject.CacheForStruct(&input2{})
+	param := &input2{
+		C: input{
+			Username: "peter",
+		},
+	}
+	err = inject.Struct(param)
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NotNil(t, param.User) {
+		return
+	}
+	if !assert.Equal(t, "peter", param.User.Username) {
+		return
+	}
+}

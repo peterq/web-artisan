@@ -279,7 +279,7 @@ func GetFieldTypeByNestedName(t reflect.Type, nestedName string) reflect.Type {
 	for _, name := range names {
 		t = getFieldTypeByName(t, name)
 		if t == nil {
-			// 如果某一级字段不存在，直接返回 nil
+			// 如果某一级字段不存在, 直接返回 nil
 			return nil
 		}
 	}
