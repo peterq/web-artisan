@@ -271,6 +271,40 @@ func panicIf(err error) {
 	}
 }
 
+func GetFieldTypeByNestedName(t reflect.Type, nestedName string) reflect.Type {
+	if nestedName == "" {
+		return t
+	}
+	names := strings.Split(nestedName, ".")
+	for _, name := range names {
+		t = getFieldTypeByName(t, name)
+		if t == nil {
+			// 如果某一级字段不存在，直接返回 nil
+			return nil
+		}
+	}
+	return t
+}
+
+// getFieldTypeByName 通过字段名获取 reflect.Type
+func getFieldTypeByName(t reflect.Type, fieldName string) reflect.Type {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		// 如果不是结构体，返回 nil
+		return nil
+	}
+
+	field, ok := t.FieldByName(fieldName)
+	if !ok {
+		// 如果字段不存在，返回 nil
+		return nil
+	}
+	return field.Type
+}
+
 func GetFieldByNestedName(v reflect.Value, nestedName string) reflect.Value {
 	if nestedName == "" {
 		return v

@@ -61,3 +61,26 @@ func TestGetFieldByNestedName_NonStructValue(t *testing.T) {
 
 	assert.False(t, result.IsValid())
 }
+
+// ptr nested
+func TestGetFieldByNestedName_PtrNested(t *testing.T) {
+	type TestStruct2 struct {
+		Field2 int
+	}
+
+	type TestStruct struct {
+		Field1 *TestStruct2
+	}
+
+	v := reflect.ValueOf(&TestStruct{
+		Field1: &TestStruct2{
+			Field2: 42,
+		},
+	})
+	nestedName := "Field1.Field2"
+
+	result := GetFieldByNestedName(v, nestedName)
+
+	assert.True(t, result.IsValid())
+	assert.Equal(t, reflect.Int, result.Kind())
+}
