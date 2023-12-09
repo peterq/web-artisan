@@ -261,7 +261,7 @@ func (inj *Inject) parseFieldTagsRecursive(tag string, fieldName string, alias s
 				}
 
 				if initFn, ok := inj.initFuncs[current.tag]; !ok {
-					panic(strings.TrimSpace(fmt.Sprintf(undefinedInjection, fieldName)))
+					panic(fmt.Sprintf("tag %s not found for %s.%s", current.tag, currentStruct.Type().Name(), fieldName))
 				} else {
 					current.fn = initFn(&TagFnState{
 						Inj:           inj,
