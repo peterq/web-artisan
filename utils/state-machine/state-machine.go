@@ -37,7 +37,7 @@ func (m *StateMachine[T]) Update(fn func(*T) bool) {
 	Update[T](m, fn)
 }
 
-func Update[T any](m *StateMachine[T], fn func(*T) bool) {
+func Update[T any](m *StateMachine[T], fn func(*T) bool) int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if fn(m.state) {
@@ -51,6 +51,7 @@ func Update[T any](m *StateMachine[T], fn func(*T) bool) {
 			m.changeCond.Broadcast()
 		}
 	}
+	return m.term
 }
 
 func Read[T any, U any](m *StateMachine[T], fn func(state *T) U) U {
@@ -59,12 +60,25 @@ func Read[T any, U any](m *StateMachine[T], fn func(state *T) U) U {
 	return fn(m.state)
 }
 
+func ReadTerm[T any, U any](m *StateMachine[T], fn func(state *T) U) (U, int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return fn(m.state), m.term
+}
+
+func ReadTermChange[T any](ctx context.Context, m *StateMachine[T], term int64) (*T, int64) {
+	d, t := ReadUntilOkCtx1(m, ctx, func(state *T, t int64) (*T, bool) {
+		return state, t > term
+	})
+	return d, t
+}
+
 func ReadUntilOk[T any, U any](m *StateMachine[T], fn func(state *T) (U, bool)) U {
 	ret, _ := ReadUntilOkCtx(m, context.Background(), fn)
 	return ret
 }
 
-func ReadUntilOkCtx[T any, U any](m *StateMachine[T], ctx context.Context, fn func(state *T) (U, bool)) (U, bool) {
+func ReadUntilOkCtx1[T any, U any](m *StateMachine[T], ctx context.Context, fn func(state *T, term int64) (U, bool)) (U, int64) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -77,11 +91,11 @@ func ReadUntilOkCtx[T any, U any](m *StateMachine[T], ctx context.Context, fn fu
 	term := m.term - 1
 	for {
 		if m.term > term {
-			data, ok = fn(m.state)
+			data, ok = fn(m.state, m.term)
 			term = m.term
 		}
 		if ok {
-			return data, true
+			return data, term
 		}
 		cond := m.changeCond.Wait()
 		m.mu.Unlock()
@@ -91,9 +105,15 @@ func ReadUntilOkCtx[T any, U any](m *StateMachine[T], ctx context.Context, fn fu
 			continue
 		case <-ctx.Done():
 			m.mu.Lock()
-			return data, false
+			return data, -1
 		}
 	}
+}
+func ReadUntilOkCtx[T any, U any](m *StateMachine[T], ctx context.Context, fn func(state *T) (U, bool)) (U, bool) {
+	d, t := ReadUntilOkCtx1(m, ctx, func(state *T, term int64) (U, bool) {
+		return fn(state)
+	})
+	return d, t > -1
 }
 
 type contentWithTerm struct {

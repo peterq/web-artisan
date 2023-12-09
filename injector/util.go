@@ -270,3 +270,33 @@ func panicIf(err error) {
 		panic(err.Error())
 	}
 }
+
+func GetFieldByNestedName(v reflect.Value, nestedName string) reflect.Value {
+	if nestedName == "" {
+		return v
+	}
+	names := strings.Split(nestedName, ".")
+	for _, name := range names {
+		v = getFieldByName(v, name)
+		if !v.IsValid() {
+			// 如果某一级字段不存在，直接返回无效的 reflect.Value
+			return v
+		}
+	}
+	return v
+}
+
+// getFieldByName 通过字段名获取 reflect.Value
+func getFieldByName(v reflect.Value, fieldName string) reflect.Value {
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		// 如果不是结构体，返回无效的 reflect.Value
+		return reflect.Value{}
+	}
+
+	field := v.FieldByName(fieldName)
+	return field
+}
