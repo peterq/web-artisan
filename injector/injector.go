@@ -63,6 +63,15 @@ func (s *TagFnState) Get(key string) interface{} {
 	return nil
 }
 
+func (s *TagFnState) GetFieldType(namespace string) reflect.Type {
+	return GetFieldTypeByNestedName(s.CurrentStruct.Type(), namespace)
+}
+
+func (s *TagFnState) GetFieldValue(namespace string) reflect.Value {
+	v, _, _ := s.Inj.GetStructFieldOK(s.CurrentStruct, namespace)
+	return v
+}
+
 // 注入器结构体
 type Inject struct {
 	tagName             string
