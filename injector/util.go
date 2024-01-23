@@ -54,7 +54,7 @@ func (inj *Inject) ParseTagValue(v string) (reflect.Kind, interface{}) {
 			return reflect.ValueOf(v).Kind(), v
 		}
 
-		panic(fmt.Sprintf("fn %s not found", parts[1]))
+		panic(fmt.Sprintf("var %s not found", parts[1]))
 	}
 	return reflect.String, v
 }
