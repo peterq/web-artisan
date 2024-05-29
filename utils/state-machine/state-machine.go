@@ -37,6 +37,15 @@ func (m *StateMachine[T]) Update(fn func(*T) bool) {
 	Update[T](m, fn)
 }
 
+func (m *StateMachine[T]) Read(fn func(*T)) T {
+	return Read[T, T](m, func(state *T) T {
+		if fn != nil {
+			fn(state)
+		}
+		return *state
+	})
+}
+
 func Update[T any](m *StateMachine[T], fn func(*T) bool) int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
